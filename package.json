@@ -1,0 +1,6 @@
+{
+  "name": "live-cam",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=18" }
+}

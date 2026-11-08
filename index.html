@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日本のライブカメラ</title>
+<meta name="description" content="空・空港・河川敷・高速道路・都市・田園風景・海・神社仏閣・動物・店内・森・山。日本各地のライブカメラを画面いっぱいに眺めるサイト。">
+<style>
+  :root {
+    --bg: #000;
+    --panel: #161b22;
+    --line: #262d36;
+    --text: #e8ecf1;
+    --muted: #8a94a3;
+    --accent: #f2b33d;
+    --live: #e5484d;
+    --gap: 3px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  }
+
+  /* ヘッダー：ふだんは上に隠れていて、画面の一番上にマウスを持っていくと出てくる */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    background: rgba(13,16,20,.94);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 16px;
+    transform: translateY(-100%);
+    transition: transform .25s ease;
+  }
+  header.show { transform: none; }
+  /* 上端の見えない帯。iframeの上ではマウスの動きが拾えないので、ここで検知する */
+  #hot {
+    position: fixed; top: 0; left: 0; right: 0; height: 14px; z-index: 19;
+  }
+  /* スマホ用のつまみ（タップでヘッダーを出す） */
+  #tab {
+    position: fixed; top: 0; left: 50%; z-index: 19; transform: translateX(-50%);
+    font: inherit; font-size: 12px; color: var(--muted);
+    background: rgba(13,16,20,.6); border: 1px solid var(--line); border-top: 0;
+    border-radius: 0 0 10px 10px; padding: 2px 14px; cursor: pointer; opacity: .5;
+  }
+  #tab:hover { opacity: 1; }
+
+  .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0 8px 0 0; letter-spacing: .05em; white-space: nowrap; }
+  h1 span { color: var(--live); }
+  nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav button, .tool, .count select {
+    font: inherit; font-size: 14px;
+    color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 14px; cursor: pointer;
+  }
+  nav button:hover, .tool:hover { border-color: var(--muted); }
+  nav button[aria-pressed="true"] { background: var(--accent); color: #1a1405; border-color: var(--accent); font-weight: 700; }
+  .count { display: flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 13px; }
+  .count select { padding: 6px 10px; }
+  .sub { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .sub .note { margin-left: auto; }
+
+  /* 映像：画面いっぱい（黒い余白なし）。列数と映像の大きさは JS が計算して入れる */
+  main { position: fixed; inset: 0; }
+  .grid { display: grid; gap: var(--gap); width: 100%; height: 100%; }
+  .grid:has(.empty) { place-items: center; }
+
+  .cam { position: relative; background: #000; overflow: hidden; }
+  /* 枠より少し大きくして中央に置く → 枠いっぱいに映る（はみ出た端は切れる） */
+  .cam iframe {
+    position: absolute; left: 50%; top: 50%;
+    width: var(--iw, 100%); height: var(--ih, 100%);
+    transform: translate(-50%, -50%); border: 0;
+  }
+  /* タイトルと拡大ボタン：マウスを乗せたときだけ出す */
+  .meta {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px 18px;
+    font-size: 12px; text-shadow: 0 1px 2px #000;
+    background: linear-gradient(rgba(0,0,0,.7), transparent);
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .cam:hover .meta { opacity: 1; }
+  .meta .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta .ch { color: #c3cad4; }
+  .meta button, dialog .meta a, dialog .meta button {
+    flex: none; font: inherit; font-size: 12px; color: var(--text);
+    background: rgba(13,16,20,.8); border: 1px solid var(--line); border-radius: 6px;
+    padding: 3px 8px; cursor: pointer; text-decoration: none; pointer-events: auto;
+  }
+  .meta button:hover { border-color: var(--muted); }
+  /* マウスがない端末（スマホ）では拡大ボタンだけ常に薄く出す */
+  @media (hover: none) {
+    .meta { opacity: 1; background: none; }
+    .meta .t { visibility: hidden; }
+    .meta button { opacity: .7; }
+  }
+
+  .empty { color: var(--muted); text-align: center; padding: 16px; line-height: 1.8; }
+
+  /* 拡大表示：画面いっぱい */
+  dialog {
+    width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0;
+    padding: 0; border: 0; background: #000; color: var(--text);
+  }
+  dialog::backdrop { background: #000; }
+  dialog #bigFrame { position: absolute; inset: 0; }
+  dialog #bigFrame iframe { width: 100%; height: 100%; border: 0; }
+  dialog .meta { opacity: 1; padding: 10px 14px 24px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="hot"></div>
+<button id="tab" title="メニューを出す">▾ メニュー</button>
+<header id="header">
+  <div class="bar">
+    <h1><span>●</span> 日本のライブカメラ</h1>
+    <nav id="nav"></nav>
+    <label class="count">画面数
+      <select id="count">
+        <option>1</option><option>2</option><option>4</option>
+        <option>6</option><option>9</option><option>12</option>
+      </select>
+    </label>
+    <button class="tool" id="reload" title="今のカテゴリで並べ直す">↻ 並べ直す</button>
+  </div>
+  <div class="sub">
+    <span id="status"></span>
+    <span class="note">映像はすべてYouTubeの公式埋め込みです。各映像の権利は配信者に帰属します。</span>
+  </div>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+</main>
+
+<dialog id="big">
+  <div id="bigFrame"></div>
+  <div class="meta">
+    <span class="t" id="bigTitle"></span>
+    <a id="bigLink" target="_blank" rel="noopener">YouTubeで開く</a>
+    <button id="bigClose">閉じる</button>
+  </div>
+</dialog>
+
+<script>
+const CATS = [
+  ['sora', '空'],
+  ['kuko', '空港'],
+  ['kasenjiki', '河川敷'],
+  ['kosoku', '高速道路'],
+  ['toshi', '都市'],
+  ['denen', '田園風景'],
+  ['umi', '海'],
+  ['jinja', '神社仏閣'],
+  ['dobutsu', '動物'],
+  ['tennai', '店内'],
+  ['moriyama', '森・山'],
+  ['random', 'ランダム'],
+];
+const COUNTS = [1, 2, 4, 6, 9, 12];
+
+const nav = document.getElementById('nav');
+const grid = document.getElementById('grid');
+const statusEl = document.getElementById('status');
+const big = document.getElementById('big');
+const header = document.getElementById('header');
+const countEl = document.getElementById('count');
+
+let current = null;
+let lastItems = [];   // APIから来た全件
+let order = [];       // シャッフル済みの並び（画面数を変えても順番を保つ）
+let label = '';
+
+// 最後に見たカテゴリと画面数を覚えておく（なければ「都市」「12」）
+function loadLast() {
+  let cat = null;
+  try { cat = localStorage.getItem('lastCat'); } catch {}
+  return CATS.some(([k]) => k === cat) ? cat : 'toshi'; // 消したカテゴリ（旧「星空」など）は「都市」に戻す
+}
+function saveLast(cat) {
+  try { localStorage.setItem('lastCat', cat); } catch {}
+}
+function loadCount() {
+  let n = 12;
+  try { n = Number(localStorage.getItem('count')) || 12; } catch {}
+  return COUNTS.includes(n) ? n : 12;
+}
+function saveCount(n) {
+  try { localStorage.setItem('count', String(n)); } catch {}
+}
+let max = loadCount();
+countEl.value = String(max);
+
+function shuffle(a) {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function embedUrl(id, muted) {
+  const p = new URLSearchParams({ autoplay: '1', mute: muted ? '1' : '0', playsinline: '1', rel: '0', modestbranding: '1' });
+  return `https://www.youtube-nocookie.com/embed/${id}?${p}`;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---- ヘッダーの出し入れ ----
+let hideTimer = null;
+// マウスの位置に頼らず「最後に触ってから○秒で必ず隠す」方式（iframeの上ではマウスの動きが取れないため）
+let pinned = false; // 読み込み中・エラー時は出したままにする
+function showHeader() {
+  clearTimeout(hideTimer);
+  header.classList.add('show');
+}
+function hideHeaderLater(ms = 3000) {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (pinned) return;
+    header.classList.remove('show');
+  }, ms);
+}
+function poke() { showHeader(); hideHeaderLater(); } // 出して、3秒後に隠す
+document.getElementById('hot').addEventListener('mouseenter', poke);
+document.getElementById('tab').addEventListener('click', poke);
+header.addEventListener('mousemove', poke);
+header.addEventListener('click', poke);
+header.addEventListener('mouseleave', () => hideHeaderLater(800));
+
+// ---- 映像の並べ方：画面いっぱいに敷きつめる ----
+// 枠の形が 16:9 に近く（＝切れる部分が少なく）、空き枠が少ない列数を選ぶ
+function layout() {
+  const n = grid.querySelectorAll('.cam').length;
+  if (!n) return;
+  const W = window.innerWidth, H = window.innerHeight;
+  const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gap')) || 0;
+  let best = null;
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const cw = (W - gap * (cols - 1)) / cols;
+    const ch = (H - gap * (rows - 1)) / rows;
+    const score = Math.abs(Math.log((cw / ch) / (16 / 9))) + (cols * rows - n) / n;
+    if (!best || score < best.score) best = { score, cols, rows, cw, ch };
+  }
+  // 枠を覆う大きさ（16:9）に映像を広げる
+  const iw = Math.max(best.cw, best.ch * 16 / 9);
+  grid.style.gridTemplateColumns = `repeat(${best.cols}, 1fr)`;
+  grid.style.gridTemplateRows = `repeat(${best.rows}, 1fr)`;
+  grid.style.setProperty('--iw', `${Math.ceil(iw)}px`);
+  grid.style.setProperty('--ih', `${Math.ceil(iw * 9 / 16)}px`);
+}
+window.addEventListener('resize', layout);
+
+function renderNav() {
+  nav.innerHTML = CATS.map(([k, label]) =>
+    `<button data-cat="${k}" aria-pressed="${k === current}">${label}</button>`).join('');
+}
+
+function setMessage(html) {
+  grid.style.gridTemplateColumns = '';
+  grid.style.gridTemplateRows = '';
+  grid.innerHTML = html ? `<div class="empty">${html}</div>` : '';
+  pinned = true;
+  showHeader();
+}
+
+function renderGrid(items) {
+  if (items.length === 0) {
+    statusEl.textContent = '';
+    setMessage('今は配信中のカメラが見つかりませんでした。<br>時間をおくか、別のボタンを試してください。');
+    return;
+  }
+  grid.innerHTML = items.map((v, i) => `
+    <div class="cam">
+      <iframe src="${embedUrl(v.id, true)}" title="${esc(v.title)}"
+        allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>
+      <div class="meta">
+        <span class="t" title="${esc(v.title)}">${esc(v.title)} <span class="ch">/ ${esc(v.channel)}</span></span>
+        <button data-big="${i}">拡大</button>
+      </div>
+    </div>`).join('');
+  layout();
+  pinned = false;
+  hideHeaderLater(2500);
+}
+
+// 手元の並び（order）から、今の画面数ぶんだけ表示する。APIは使わない
+function show() {
+  const items = order.slice(0, max);
+  renderGrid(items);
+  if (items.length) statusEl.textContent = `${label}：${lastItems.length}件中 ${items.length}件を表示中`;
+}
+
+async function load(cat, { reshuffleOnly = false } = {}) {
+  current = cat;
+  saveLast(cat);
+  renderNav();
+
+  if (reshuffleOnly && lastItems.length) {
+    order = shuffle(lastItems);
+    show();
+    return;
+  }
+
+  statusEl.textContent = '配信中のカメラを探しています…';
+  setMessage('');
+  lastItems = [];
+  order = [];
+  try {
+    const r = await fetch(`/api/live?cat=${encodeURIComponent(cat)}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '読み込みに失敗しました');
+    if (current !== cat) return; // 途中で別のボタンが押された
+    lastItems = j.items;
+    order = shuffle(j.items);
+    label = j.label;
+    show();
+  } catch (e) {
+    if (current !== cat) return;
+    statusEl.textContent = '';
+    setMessage(`読み込みに失敗しました。<br><small>${esc(e.message)}</small>`);
+  }
+}
+
+nav.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-cat]');
+  if (b) load(b.dataset.cat);
+});
+
+document.getElementById('reload').addEventListener('click', () => {
+  if (current) load(current, { reshuffleOnly: true });
+});
+
+// 画面数を変える（並び順はそのまま、APIも使わない）
+countEl.addEventListener('change', () => {
+  max = Number(countEl.value);
+  saveCount(max);
+  countEl.blur();
+  if (lastItems.length) show();
+});
+
+// 拡大：音ありで画面いっぱいに表示
+grid.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-big]');
+  if (!b) return;
+  const cam = b.closest('.cam');
+  const id = cam.querySelector('iframe').src.match(/embed\/([^?]+)/)[1];
+  const title = cam.querySelector('.t').getAttribute('title');
+  document.getElementById('bigFrame').innerHTML =
+    `<iframe src="${embedUrl(id, false)}" title="${esc(title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
+  document.getElementById('bigTitle').textContent = title;
+  document.getElementById('bigLink').href = `https://www.youtube.com/watch?v=${id}`;
+  big.showModal();
+});
+
+function closeBig() {
+  document.getElementById('bigFrame').innerHTML = ''; // 閉じたら音を止める
+  big.close();
+}
+document.getElementById('bigClose').addEventListener('click', closeBig);
+big.addEventListener('cancel', (e) => { e.preventDefault(); closeBig(); });
+
+showHeader(); // 最初は少しだけ見せて、どこにあるか分かるようにする
+load(loadLast());
+</script>
+</body>
+</html>
